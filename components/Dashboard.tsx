@@ -1,27 +1,28 @@
-"use client"
-import React, { useState, useEffect } from 'react';
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FaExclamationTriangle, FaChartLine, FaSearch, FaTrash, FaEdit, FaMinus, FaEllipsisV, FaUndo } from "react-icons/fa";
+"use client";
+import React, { useState, useEffect } from "react";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, limit, Timestamp, deleteDoc, doc, where } from "firebase/firestore";
-import DeductProduct from './DeductProduct';
-import DeleteProduct from './DeleteProduct';
-import UpdateProduct from './UpdateProduct';
+import {
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  limit,
+  Timestamp,
+  where,
+  getDocs,
+  deleteDoc,
+  doc,
+  updateDoc,
+  addDoc,
+} from "firebase/firestore";
+import { returnDeduction } from "@/lib/firebaseUtils";
+import StockAlerts from "./dashboard/StockAlerts";
+import TopSelling from "./dashboard/TopSelling";
+import ProductInventory from "./dashboard/ProductInventory";
+import Deductions from "./dashboard/Deductions";
+import { getCachedProducts, setCachedProducts, invalidateProductCache } from '@/lib/productCache';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AddProductForm from './AddProductForm';
-import { DotLottieReact } from '@lottiefiles/dotlottie-react';
-import { returnDeduction } from '@/lib/firebaseUtils';
 
 interface Product {
   id: string;
@@ -46,122 +47,160 @@ interface Category {
   name: string;
 }
 
+interface TopSellingProduct {
+  productName: string;
+  totalDeductions: number;
+}
+
 const Dashboard = () => {
   const [products, setProducts] = useState<Product[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [stockAlerts, setStockAlerts] = useState<Product[]>([]);
-  const [topSelling, setTopSelling] = useState<{ product: string; sales: number }[]>([]);
-  const [latestDeductions, setLatestDeductions] = useState<Deduction[]>([]);
-  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
-  const [productToUpdate, setProductToUpdate] = useState<Product | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('');
+  const [stockAlerts, setStockAlerts] = useState<Product[]>([]);
+  const [topSelling, setTopSelling] = useState<TopSellingProduct[]>([]);
+  const [latestDeductions, setLatestDeductions] = useState<Deduction[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productToUpdate, setProductToUpdate] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isAddProductDialogOpen, setIsAddProductDialogOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
 
   useEffect(() => {
-    console.log("Dashboard useEffect triggered");
-
-    // Fetch only products with low stock
-    const lowStockQuery = query(
-      collection(db, "products"),
-      where("stock", "<", 10),
-      limit(20) // Adjust this number as needed
-    );
-
-    const unsubscribeLowStock = onSnapshot(lowStockQuery, (snapshot) => {
-      console.log("Low stock products snapshot received", snapshot.size);
-      const productList: Product[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-      console.log("Processed low stock products:", productList);
-      setStockAlerts(productList);
-    }, (error) => {
-      console.error("Error fetching low stock products:", error);
-    });
-
-    // Fetch latest deductions
-    const deductionsQuery = query(
-      collection(db, "deductions"),
-      orderBy("date", "desc"),
-      limit(5)
-    );
-    const unsubscribeDeductions = onSnapshot(deductionsQuery, (snapshot) => {
-      console.log("Deductions snapshot received", snapshot.size);
-      const deductionList: Deduction[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        deductionList.push({
-          id: doc.id,
-          productId: data.productId,
-          productName: data.productName,
-          amount: data.amount,
-          date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
-        });
-      });
-      console.log("Processed deductions:", deductionList);
-      setLatestDeductions(deductionList);
-    }, (error) => {
-      console.error("Error fetching deductions:", error);
-    });
-
-    // Fetch categories
-    const categoriesQuery = query(collection(db, "categories"));
-    const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-      console.log("Categories snapshot received", snapshot.size);
-      const categoryList: Category[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        name: doc.data().name
-      }));
-      console.log("Processed categories:", categoryList);
-      setCategories(categoryList);
-
-      // Set active tab to the first category if not set
-      if (!activeTab && categoryList.length > 0) {
-        setActiveTab(categoryList[0].id);
+    const fetchData = async () => {
+      // Check cache for products
+      const cachedProducts = await getCachedProducts();
+      if (cachedProducts) {
+        setProducts(cachedProducts);
+      } else {
+        // Fetch all products
+        const productsQuery = query(collection(db, "products"));
+        const productsSnapshot = await getDocs(productsQuery);
+        const productList: Product[] = productsSnapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() } as Product)
+        );
+        setProducts(productList);
+        // Update cache
+        await setCachedProducts(productList);
       }
-    }, (error) => {
-      console.error("Error fetching categories:", error);
-    });
 
-    return () => {
-      unsubscribeLowStock();
-      unsubscribeDeductions();
-      unsubscribeCategories();
+      // Fetch low stock products
+      const lowStockQuery = query(
+        collection(db, "products"),
+        where("stock", "<", 10),
+        limit(20)
+      );
+      const unsubscribeLowStock = onSnapshot(lowStockQuery, (snapshot) => {
+        const productList: Product[] = snapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() } as Product)
+        );
+        setStockAlerts(productList);
+      });
+
+      // Fetch top selling products
+      const topSellingQuery = query(
+        collection(db, "deductions"),
+        orderBy("amount", "desc"),
+        limit(100) // Fetch more to aggregate accurately
+      );
+      const topSellingSnapshot = await getDocs(topSellingQuery);
+      const deductionsData = topSellingSnapshot.docs.map(doc => doc.data());
+
+      // Process deductions to get top selling products
+      const productDeductions = deductionsData.reduce((acc, deduction) => {
+        const { productName, amount } = deduction;
+        if (!acc[productName]) {
+          acc[productName] = 0;
+        }
+        acc[productName] += amount;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const topSellingProducts = Object.entries(productDeductions)
+        .map(([productName, totalDeductions]) => ({ productName, totalDeductions }))
+        .sort((a, b) => b.totalDeductions - a.totalDeductions)
+        .slice(0, 5); // Get only top 5
+
+      setTopSelling(topSellingProducts);
+
+      // Fetch latest deductions
+      const latestDeductionsQuery = query(
+        collection(db, "deductions"),
+        orderBy("date", "desc"),
+        limit(5)
+      );
+      const unsubscribeDeductions = onSnapshot(latestDeductionsQuery, (snapshot) => {
+        const deductionList: Deduction[] = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            productId: data.productId,
+            productName: data.productName,
+            amount: data.amount,
+            date:
+              data.date instanceof Timestamp
+                ? data.date.toDate()
+                : new Date(data.date),
+          };
+        });
+        setLatestDeductions(deductionList);
+      });
+
+      // Fetch categories
+      const categoriesQuery = query(collection(db, "categories"));
+      const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
+        const categoryList: Category[] = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          name: doc.data().name,
+        }));
+        setCategories(categoryList);
+      });
+
+      return () => {
+        unsubscribeLowStock();
+        unsubscribeDeductions();
+        unsubscribeCategories();
+      };
     };
+
+    fetchData();
   }, []);
 
-  const filteredProducts = (categoryName: string) => 
-    categoryName === 'All' 
-      ? products.filter(product => product.name.toLowerCase().includes(searchTerm.toLowerCase()))
-      : products.filter(product => 
-          product.categoryName === categoryName && 
-          product.name.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+  const handleReturnDeduction = async (deduction: Deduction) => {
+    try {
+      await returnDeduction(deduction);
+    } catch (error) {
+      console.error("Error returning deduction:", error);
+    }
+  };
 
-  const handleDeductSuccess = () => {
+  const handleDeleteDeduction = async (deductionId: string) => {
+    try {
+      await deleteDoc(doc(db, "deductions", deductionId));
+    } catch (error) {
+      console.error("Error deleting deduction:", error);
+    }
+  };
+
+  const handleDeductSuccess = async () => {
     setSelectedProduct(null);
+    await invalidateProductCache();
   };
 
-  const handleUpdateSuccess = () => {
+  const handleUpdateSuccess = async () => {
     setProductToUpdate(null);
+    await invalidateProductCache();
   };
 
-  const handleDeleteSuccess = () => {
+  const handleDeleteSuccess = async () => {
     setProductToDelete(null);
+    await invalidateProductCache();
   };
 
   const handleDeleteCancel = () => {
     setProductToDelete(null);
   };
 
-  const handleDeleteDeduction = async (deductionId: string) => {
-    try {
-      await deleteDoc(doc(db, "deductions", deductionId));
-      // The UI will update automatically due to the real-time listener
-    } catch (error) {
-      console.error("Error deleting deduction:", error);
-      // You might want to show an error message to the user here
-    }
+  const handleProductAdded = () => {
+    setIsAddProductDialogOpen(false);
   };
 
   const handleAddProduct = (category: string) => {
@@ -169,197 +208,108 @@ const Dashboard = () => {
     setIsAddProductDialogOpen(true);
   };
 
-  const handleProductAdded = () => {
-    setIsAddProductDialogOpen(false);
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    try {
+      // Delete the category
+      await deleteDoc(doc(db, "categories", categoryId));
+
+      // Update products in this category to "Uncategorized"
+      const productsToUpdate = products.filter(p => p.categoryName === categoryName);
+      for (const product of productsToUpdate) {
+        await updateDoc(doc(db, "products", product.id), {
+          categoryName: "Uncategorized"
+        });
+      }
+
+      // Update local state
+      setCategories(prevCategories => prevCategories.filter(cat => cat.id !== categoryId));
+      setProducts(prevProducts => prevProducts.map(p => 
+        p.categoryName === categoryName ? {...p, categoryName: "Uncategorized"} : p
+      ));
+
+      // Ensure "Uncategorized" category exists
+      const uncategorizedExists = categories.some(cat => cat.name === "Uncategorized");
+      if (!uncategorizedExists) {
+        const newUncategorized = await addDoc(collection(db, "categories"), { name: "Uncategorized" });
+        setCategories(prevCategories => [...prevCategories, { id: newUncategorized.id, name: "Uncategorized" }]);
+      }
+
+    } catch (error) {
+      console.error("Error deleting category:", error);
+      // Handle the error (show a notification to the user, etc.)
+    }
   };
 
-  const handleReturnDeduction = async (deduction: Deduction) => {
+  const handleRenameCategory = async (categoryId: string, newName: string) => {
     try {
-      await returnDeduction(deduction);
-      // The UI will update automatically due to the real-time listener
+      await updateDoc(doc(db, "categories", categoryId), { name: newName });
+      
+      // Update local state
+      setCategories(prevCategories => 
+        prevCategories.map(cat => 
+          cat.id === categoryId ? { ...cat, name: newName } : cat
+        )
+      );
+
+      // Update products with the old category name
+      const oldCategory = categories.find(cat => cat.id === categoryId);
+      if (oldCategory) {
+        const productsToUpdate = products.filter(p => p.categoryName === oldCategory.name);
+        for (const product of productsToUpdate) {
+          await updateDoc(doc(db, "products", product.id), {
+            categoryName: newName
+          });
+        }
+
+        // Update local state for products
+        setProducts(prevProducts => 
+          prevProducts.map(p => 
+            p.categoryName === oldCategory.name ? { ...p, categoryName: newName } : p
+          )
+        );
+      }
     } catch (error) {
-      console.error("Error returning deduction:", error);
-      // You might want to show an error message to the user here
+      console.error("Error renaming category:", error);
+      // Handle the error (show a notification to the user, etc.)
     }
+  };
+
+  const handleAddProductToCategory = (categoryName: string) => {
+    setSelectedCategory(categoryName);
+    setIsAddProductDialogOpen(true);
   };
 
   return (
     <div className='p-6 space-y-6'>
-      {/* Debug information */}
-      <div className="bg-yellow-100 p-4 rounded-md">
-        <h3 className="font-bold">Debug Info:</h3>
-        <p>Products: {products.length}</p>
-        <p>Categories: {categories.length}</p>
-        <p>Stock Alerts: {stockAlerts.length}</p>
-        <p>Latest Deductions: {latestDeductions.length}</p>
-      </div>
 
-      {/* Stock Alerts and Top Selling Cards */}
       <div className='grid grid-cols-1 sm:grid-cols-2 gap-6'>
-        {/* Stock Alert Card */}
-        <div className='bg-midLightBlue p-4 rounded-lg shadow-md'>
-          <div className='flex items-center space-x-2 mb-2'>
-            <FaExclamationTriangle className='text-red-500 w-5 h-5' />
-            <h2 className='text-lg font-semibold'>Stock Alert</h2>
-          </div>
-          <div>
-            {stockAlerts.length > 0 ? (
-              stockAlerts.map((alert) => (
-                <p key={alert.id}>
-                  {alert.name}: <span className='font-bold'>{alert.stock}</span> remaining
-                </p>
-              ))
-            ) : (
-              <p>No products with low stock.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Top Selling Card */}
-        <div className='bg-lightBlue p-4 rounded-lg shadow-md'>
-          <div className='flex items-center space-x-2 mb-2'>
-            <FaChartLine className='text-darkBlue w-5 h-5' />
-            <h2 className='text-lg font-semibold'>Top Selling</h2>
-          </div>
-          <div>
-            {topSelling.map((product, index) => (
-              <p key={index}>
-                {product.product}: <span className='font-bold'>{product.sales}</span> sales
-              </p>
-            ))}
-          </div>
-        </div>
+        <StockAlerts stockAlerts={stockAlerts} />
+        <TopSelling topSelling={topSelling} />
       </div>
 
-      {/* Product Inventory Section */}
-      <div className='bg-white p-6 rounded-lg shadow-md'>
-        <div className='flex justify-between items-center mb-4'>
-          <h2 className='text-xl font-semibold'>Product Inventory</h2>
-          <div className='flex items-center'>
-            <FaSearch className='text-gray-400 mr-2' />
-            <Input
-              type='text'
-              placeholder='Search products...'
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className='max-w-xs'
-            />
-          </div>
-        </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="All">All</TabsTrigger>
-            {categories.map((category) => (
-              <TabsTrigger key={category.id} value={category.id}>
-                {category.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <TabsContent value="All">
-            <ProductTable 
-              products={filteredProducts('All')}
-              setSelectedProduct={setSelectedProduct}
-              setProductToUpdate={setProductToUpdate}
-              setProductToDelete={setProductToDelete}
-              selectedProduct={selectedProduct}
-              productToUpdate={productToUpdate}
-              productToDelete={productToDelete}
-              handleDeductSuccess={handleDeductSuccess}
-              handleUpdateSuccess={handleUpdateSuccess}
-              handleDeleteSuccess={handleDeleteSuccess}
-              handleDeleteCancel={handleDeleteCancel}
-            />
-          </TabsContent>
-          {categories.map((category) => (
-            <TabsContent key={category.id} value={category.id}>
-              {filteredProducts(category.name).length > 0 ? (
-                <ProductTable 
-                  products={filteredProducts(category.name)}
-                  setSelectedProduct={setSelectedProduct}
-                  setProductToUpdate={setProductToUpdate}
-                  setProductToDelete={setProductToDelete}
-                  selectedProduct={selectedProduct}
-                  productToUpdate={productToUpdate}
-                  productToDelete={productToDelete}
-                  handleDeductSuccess={handleDeductSuccess}
-                  handleUpdateSuccess={handleUpdateSuccess}
-                  handleDeleteSuccess={handleDeleteSuccess}
-                  handleDeleteCancel={handleDeleteCancel}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center">
-                  <DotLottieReact
-                    src="https://lottie.host/cd05d6b5-1bed-4ead-9c5b-51dd473dc491/X9sRzN0NxR.json"
-                    loop
-                    autoplay
-                    style={{ width: '300px', height: '300px' }}
-                  />
-                  <p className="mt-4 text-lg font-semibold">No products in this category</p>
-                  <Button 
-                    className='mt-4 bg-darkBlue text-white'
-                    onClick={() => handleAddProduct(category.name)}
-                  >
-                    Add Product
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-          ))}
-        </Tabs>
-      </div>
+      <ProductInventory 
+        products={products} 
+        categories={categories}
+        setSelectedProduct={setSelectedProduct}
+        setProductToUpdate={setProductToUpdate}
+        setProductToDelete={setProductToDelete}
+        selectedProduct={selectedProduct}
+        productToUpdate={productToUpdate}
+        productToDelete={productToDelete}
+        handleDeductSuccess={handleDeductSuccess}
+        handleUpdateSuccess={handleUpdateSuccess}
+        handleDeleteSuccess={handleDeleteSuccess}
+        handleDeleteCancel={handleDeleteCancel}
+        handleAddProduct={handleAddProduct}
+        onDeleteCategory={handleDeleteCategory}
+        onRenameCategory={handleRenameCategory}
+        onAddProductToCategory={handleAddProductToCategory}
+      />
 
-      {/* Latest Deductions Section */}
-      <div className='bg-white p-6 rounded-lg shadow-md'>
-        <h2 className='text-xl font-semibold mb-4'>Latest Deductions</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product Name</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {latestDeductions.map((deduction) => (
-              <TableRow key={deduction.id}>
-                <TableCell>{deduction.productName}</TableCell>
-                <TableCell>{deduction.amount}</TableCell>
-                <TableCell>{deduction.date.toLocaleString()}</TableCell>
-                <TableCell>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="ghost" className="h-8 w-8 p-0">
-                        <FaEllipsisV className="h-4 w-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-56">
-                      <div className="grid gap-4">
-                        <Button
-                          className="w-full justify-start"
-                          variant="ghost"
-                          onClick={() => handleReturnDeduction(deduction)}
-                        >
-                          <FaUndo className="mr-2 h-4 w-4" />
-                          Return
-                        </Button>
-                        <Button
-                          className="w-full justify-start text-red-600 hover:text-red-600 hover:bg-red-100"
-                          variant="ghost"
-                          onClick={() => handleDeleteDeduction(deduction.id)}
-                        >
-                          <FaTrash className="mr-2 h-4 w-4" />
-                          Delete
-                        </Button>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <Deductions
+        onReturnDeduction={handleReturnDeduction}
+        onDeleteDeduction={handleDeleteDeduction}
+      />
 
       {/* Add Product Dialog */}
       <Dialog open={isAddProductDialogOpen} onOpenChange={setIsAddProductDialogOpen}>
@@ -370,150 +320,11 @@ const Dashboard = () => {
           <AddProductForm 
             onSuccess={handleProductAdded} 
             onAddCategory={() => {}} 
-            initialCategory={selectedCategory}
+            initialCategory={selectedCategory || undefined}
           />
         </DialogContent>
       </Dialog>
     </div>
-  );
-};
-
-// Separate component for the product table
-interface ProductTableProps {
-  products: Product[];
-  setSelectedProduct: React.Dispatch<React.SetStateAction<Product | null>>;
-  setProductToUpdate: React.Dispatch<React.SetStateAction<Product | null>>;
-  setProductToDelete: React.Dispatch<React.SetStateAction<Product | null>>;
-  selectedProduct: Product | null;
-  productToUpdate: Product | null;
-  productToDelete: Product | null;
-  handleDeductSuccess: () => void;
-  handleUpdateSuccess: () => void;
-  handleDeleteSuccess: () => void;
-  handleDeleteCancel: () => void;
-}
-
-const ProductTable: React.FC<ProductTableProps> = ({
-  products,
-  setSelectedProduct,
-  setProductToUpdate,
-  setProductToDelete,
-  selectedProduct,
-  productToUpdate,
-  productToDelete,
-  handleDeductSuccess,
-  handleUpdateSuccess,
-  handleDeleteSuccess,
-  handleDeleteCancel
-}) => {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Product</TableHead>
-          <TableHead>Category</TableHead>
-          <TableHead>Stock</TableHead>
-          <TableHead>Action</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {products.map((product) => (
-          <TableRow key={product.id}>
-            <TableCell>{product.name}</TableCell>
-            <TableCell>{product.categoryName}</TableCell>
-            <TableCell>
-              {product.stock}
-              {product.isDivisible && product.fractionRemaining !== undefined
-                ? ` + ${product.fractionRemaining} ${product.fractionPerUnit}`
-                : ''}
-            </TableCell>
-            <TableCell>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="ghost" className="h-8 w-8 p-0">
-                    <FaEllipsisV className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-56">
-                  <div className="grid gap-4">
-                    <Button
-                      className="w-full justify-start"
-                      variant="ghost"
-                      onClick={() => setSelectedProduct(product)}
-                    >
-                      <FaMinus className="mr-2 h-4 w-4" />
-                      Deduct
-                    </Button>
-                    <Button
-                      className="w-full justify-start"
-                      variant="ghost"
-                      onClick={() => setProductToUpdate(product)}
-                    >
-                      <FaEdit className="mr-2 h-4 w-4" />
-                      Update
-                    </Button>
-                    <Button
-                      className="w-full justify-start text-red-600 hover:text-red-600 hover:bg-red-100"
-                      variant="ghost"
-                      onClick={() => setProductToDelete(product)}
-                    >
-                      <FaTrash className="mr-2 h-4 w-4" />
-                      Delete
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Deduct Dialog */}
-              <Dialog open={selectedProduct?.id === product.id} onOpenChange={(open) => !open && setSelectedProduct(null)}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Deduct Product: {selectedProduct?.name}</DialogTitle>
-                  </DialogHeader>
-                  {selectedProduct && (
-                    <DeductProduct 
-                      product={selectedProduct} 
-                      onSuccess={handleDeductSuccess}
-                    />
-                  )}
-                </DialogContent>
-              </Dialog>
-
-              {/* Update Dialog */}
-              <Dialog open={productToUpdate?.id === product.id} onOpenChange={(open) => !open && setProductToUpdate(null)}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Update Product: {productToUpdate?.name}</DialogTitle>
-                  </DialogHeader>
-                  {productToUpdate && (
-                    <UpdateProduct 
-                      product={productToUpdate}
-                      onSuccess={handleUpdateSuccess}
-                    />
-                  )}
-                </DialogContent>
-              </Dialog>
-
-              {/* Delete Dialog */}
-              <Dialog open={productToDelete?.id === product.id} onOpenChange={(open) => !open && setProductToDelete(null)}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Delete Product: {productToDelete?.name}</DialogTitle>
-                  </DialogHeader>
-                  {productToDelete && (
-                    <DeleteProduct 
-                      product={productToDelete}
-                      onSuccess={handleDeleteSuccess}
-                      onCancel={handleDeleteCancel}
-                    />
-                  )}
-                </DialogContent>
-              </Dialog>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   );
 };
 
