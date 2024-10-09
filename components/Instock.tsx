@@ -30,8 +30,7 @@ const Instock: React.FC = () => {
     setLoading(true);
     let productsQuery = query(
       collection(db, "products"),
-      where("stock", ">", 0),
-      orderBy("name"),
+      orderBy("stock", "desc"), // Change this line
       limit(ITEMS_PER_PAGE)
     );
 
@@ -43,7 +42,9 @@ const Instock: React.FC = () => {
     }
 
     const productsSnapshot = await getDocs(productsQuery);
-    const productList = productsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+    const productList = productsSnapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+      .filter(product => product.stock > 0); // Filter out products with stock <= 0
     setProducts(productList);
     setCurrentPage(page);
 
