@@ -13,7 +13,7 @@ const Logout: React.FC = () => {
   };
 
   return (
-    <Button onClick={handleLogout}>Logout</Button>
+    <Button onClick={handleLogout} className='bg-darkBlue text-white'>Logout</Button>
   );
 };
 

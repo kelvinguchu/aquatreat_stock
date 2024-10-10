@@ -1,3 +1,5 @@
+"use client"
+
 import React, { useState, useEffect } from "react";
 import {
   Table,
@@ -33,23 +35,18 @@ import {
   where,
   Query,
   DocumentData,
+  onSnapshot,
 } from "firebase/firestore";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Pagination,
   PaginationContent,
-  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 interface Deduction {
   id: string;
@@ -60,9 +57,15 @@ interface Deduction {
   date: Date;
 }
 
+interface Category {
+  id: string;
+  name: string;
+}
+
 interface DeductionsProps {
   onReturnDeduction: (deduction: Deduction) => void;
   onDeleteDeduction: (deductionId: string) => void;
+  categories: Category[];
 }
 
 interface SearchParams {
@@ -76,6 +79,7 @@ const ITEMS_PER_PAGE = 10;
 const Deductions: React.FC<DeductionsProps> = ({
   onReturnDeduction,
   onDeleteDeduction,
+  categories,
 }) => {
   const [deductions, setDeductions] = useState<Deduction[]>([]);
   const [loading, setLoading] = useState(false);
@@ -83,108 +87,73 @@ const Deductions: React.FC<DeductionsProps> = ({
   const [selectedCategory, setSelectedCategory] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  const fetchDeductions = async (searchParams: SearchParams = {}, page = 1) => {
-    setLoading(true);
-    let deductionsQuery: Query<DocumentData> = query(
-      collection(db, "deductions"),
-      orderBy("date", "desc"),
-      limit(ITEMS_PER_PAGE)
-    );
-
-    if (searchParams.category) {
-      deductionsQuery = query(
-        deductionsQuery,
-        where("categoryName", "==", searchParams.category)
-      );
-    }
-    if (searchParams.startDate) {
-      deductionsQuery = query(
-        deductionsQuery,
-        where("date", ">=", searchParams.startDate)
-      );
-    }
-    if (searchParams.endDate) {
-      deductionsQuery = query(
-        deductionsQuery,
-        where("date", "<=", searchParams.endDate)
-      );
-    }
-
-    if (page > 1) {
-      const lastVisible = await getLastVisibleDoc(
-        deductionsQuery,
-        (page - 1) * ITEMS_PER_PAGE
-      );
-      if (lastVisible) {
-        deductionsQuery = query(deductionsQuery, startAfter(lastVisible));
-      }
-    }
-
-    const snapshot = await getDocs(deductionsQuery);
-    const deductionList = snapshot.docs.map(
-      (doc) =>
-        ({
-          id: doc.id,
-          ...doc.data(),
-          date:
-            doc.data().date instanceof Timestamp
-              ? doc.data().date.toDate()
-              : new Date(doc.data().date),
-        } as Deduction)
-    );
-
-    setDeductions(deductionList);
-    setCurrentPage(page);
-
-    // Get total count for pagination
-    const totalSnapshot = await getDocs(query(collection(db, "deductions")));
-    setTotalPages(Math.ceil(totalSnapshot.size / ITEMS_PER_PAGE));
-
-    setLoading(false);
-  };
-
-  const getLastVisibleDoc = async (
-    baseQuery: Query<DocumentData>,
-    offset: number
-  ) => {
-    const q = query(baseQuery, limit(offset));
-    const snapshot = await getDocs(q);
-    return snapshot.docs[snapshot.docs.length - 1];
-  };
+  const { toast } = useToast();
 
   useEffect(() => {
-    fetchDeductions();
-    fetchCategories();
+    const fetchDeductions = () => {
+      setLoading(true);
+      let deductionsQuery: Query<DocumentData> = query(
+        collection(db, "deductions"),
+        orderBy("date", "desc"),
+        limit(ITEMS_PER_PAGE)
+      );
+
+      if (selectedCategory && selectedCategory !== "All") {
+        deductionsQuery = query(deductionsQuery, where("categoryName", "==", selectedCategory));
+      }
+      if (startDate) {
+        deductionsQuery = query(deductionsQuery, where("date", ">=", new Date(startDate)));
+      }
+      if (endDate) {
+        deductionsQuery = query(deductionsQuery, where("date", "<=", new Date(endDate)));
+      }
+
+      const unsubscribe = onSnapshot(deductionsQuery, (snapshot) => {
+        const deductionList = snapshot.docs.map(
+          (doc) => ({
+            id: doc.id,
+            ...doc.data(),
+            date: doc.data().date instanceof Timestamp
+              ? doc.data().date.toDate()
+              : new Date(doc.data().date),
+          } as Deduction)
+        );
+        setDeductions(deductionList);
+        setLoading(false);
+      });
+
+      return unsubscribe;
+    };
+
+    const unsubscribe = fetchDeductions();
+
+    return () => {
+      unsubscribe();
+    };
+  }, [selectedCategory, startDate, endDate]);
+
+  useEffect(() => {
+    const fetchTotalPages = async () => {
+      const totalSnapshot = await getDocs(query(collection(db, "deductions")));
+      setTotalPages(Math.ceil(totalSnapshot.size / ITEMS_PER_PAGE));
+    };
+
+    fetchTotalPages();
   }, []);
 
-  const fetchCategories = async () => {
-    const categoriesSnapshot = await getDocs(collection(db, "categories"));
-    const categoryList = categoriesSnapshot.docs.map((doc) => doc.data().name);
-    setCategories(["All", ...categoryList]);
-  };
-
   const handleSearch = () => {
-    const searchParams: SearchParams = {
-      category: selectedCategory !== "All" ? selectedCategory : undefined,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
-    };
-    fetchDeductions(searchParams);
+    // The search is now handled by the real-time listener
+    // You might want to reset the currentPage here
+    setCurrentPage(1);
   };
 
   const handlePageChange = (page: number) => {
-    fetchDeductions(
-      {
-        category: selectedCategory !== "All" ? selectedCategory : undefined,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-      },
-      page
-    );
+    setCurrentPage(page);
+    // You might want to update the query with a new startAfter here
+    // This would require keeping track of the last visible document for each page
   };
 
   const filteredDeductions = deductions.filter((deduction) =>
@@ -196,11 +165,55 @@ const Deductions: React.FC<DeductionsProps> = ({
     setSelectedCategory("");
     setStartDate("");
     setEndDate("");
-    fetchDeductions();
+    setCurrentPage(1);
+  };
+
+  const handleReturnDeduction = async (deduction: Deduction) => {
+    try {
+      await onReturnDeduction(deduction);
+      toast({
+        title: "Deduction Returned",
+        description: `Successfully returned ${deduction.amount} of ${deduction.productName}`,
+        variant: "default",
+        className: "bg-midBlue text-white",
+        action: (
+          <ToastAction altText="Dismiss">Dismiss</ToastAction>
+        ),
+      });
+    } catch (error) {
+      console.error("Error returning deduction:", error);
+      toast({
+        title: "Error",
+        description: "Failed to return deduction. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteDeduction = async (deductionId: string) => {
+    try {
+      await onDeleteDeduction(deductionId);
+      toast({
+        title: "Deduction Deleted",
+        description: "Successfully deleted the deduction",
+        variant: "default",
+        className: "bg-darkBlue text-white",
+        action: (
+          <ToastAction altText="Dismiss">Dismiss</ToastAction>
+        ),
+      });
+    } catch (error) {
+      console.error("Error deleting deduction:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete deduction. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
-    <div className='p-6 space-y-6 bg-white rounded-lg'>
+    <div className='p-6 space-y-6 bg-white rounded-lg text-deepNavy'>
       <h2 className='text-2xl font-semibold mb-4'>Deductions</h2>
       <div className='flex space-x-4 mb-4'>
         <Input
@@ -210,31 +223,25 @@ const Deductions: React.FC<DeductionsProps> = ({
           onChange={(e) => setSearchTerm(e.target.value)}
           className='max-w-xs'
         />
-        <Select onValueChange={setSelectedCategory} value={selectedCategory}>
-          <SelectTrigger className='w-[180px]'>
-            <SelectValue placeholder='Select category' />
-          </SelectTrigger>
-          <SelectContent>
-            {categories.map((category) => (
-              <SelectItem key={category} value={category}>
-                {category}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
-          type='date'
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          className='max-w-xs'
-        />
-        <Input
-          type='date'
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          className='max-w-xs'
-        />
-        <Button onClick={handleSearch}>
+        <div className='flex flex-row items-center space-x-1'>
+          <h2 className='font-bold text-deepNavy'>From:</h2>
+          <Input
+            type='date'
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className='max-w-xs'
+          />
+        </div>
+        <div className='flex flex-row items-center space-x-1'>
+          <h2 className='font-bold text-deepNavy'>To:</h2>
+          <Input
+            type='date'
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className='max-w-xs'
+          />
+        </div>
+        <Button onClick={handleSearch} className="bg-darkBlue">
           <FaSearch className='mr-2' /> Search
         </Button>
         <Button onClick={clearSearch} variant='outline'>
@@ -245,7 +252,6 @@ const Deductions: React.FC<DeductionsProps> = ({
         <TableHeader>
           <TableRow>
             <TableHead>Product Name</TableHead>
-            <TableHead>Category</TableHead>
             <TableHead>Amount</TableHead>
             <TableHead>Date</TableHead>
             <TableHead>Action</TableHead>
@@ -255,7 +261,6 @@ const Deductions: React.FC<DeductionsProps> = ({
           {filteredDeductions.map((deduction) => (
             <TableRow key={deduction.id}>
               <TableCell>{deduction.productName}</TableCell>
-              <TableCell>{deduction.categoryName}</TableCell>
               <TableCell>{deduction.amount}</TableCell>
               <TableCell>{deduction.date.toLocaleString()}</TableCell>
               <TableCell>
@@ -270,14 +275,14 @@ const Deductions: React.FC<DeductionsProps> = ({
                       <Button
                         className='w-full justify-start'
                         variant='ghost'
-                        onClick={() => onReturnDeduction(deduction)}>
+                        onClick={() => handleReturnDeduction(deduction)}>
                         <FaUndo className='mr-2 h-4 w-4' />
                         Return
                       </Button>
                       <Button
                         className='w-full justify-start text-red-600 hover:text-red-600 hover:bg-red-100'
                         variant='ghost'
-                        onClick={() => onDeleteDeduction(deduction.id)}>
+                        onClick={() => handleDeleteDeduction(deduction.id)}>
                         <FaTrash className='mr-2 h-4 w-4' />
                         Delete
                       </Button>

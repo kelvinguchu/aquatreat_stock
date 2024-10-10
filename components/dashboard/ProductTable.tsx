@@ -1,12 +1,29 @@
-import React from 'react';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import React from "react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FaEllipsisV, FaMinus, FaEdit, FaTrash } from "react-icons/fa";
-import DeductProduct from '../DeductProduct';
-import UpdateProduct from '../UpdateProduct';
-import DeleteProduct from '../DeleteProduct';
+import DeductProduct from "../DeductProduct";
+import UpdateProduct from "../UpdateProduct";
+import DeleteProduct from "../DeleteProduct";
+import { cn } from "@/lib/utils";
 
 interface Product {
   id: string;
@@ -30,6 +47,8 @@ interface ProductTableProps {
   handleUpdateSuccess: () => void;
   handleDeleteSuccess: () => void;
   handleDeleteCancel: () => void;
+  highlightedProductId: string | null;
+  handleDeduct: (amount: number) => Promise<void>; // Add this line
 }
 
 const ProductTable: React.FC<ProductTableProps> = ({
@@ -43,7 +62,9 @@ const ProductTable: React.FC<ProductTableProps> = ({
   handleDeductSuccess,
   handleUpdateSuccess,
   handleDeleteSuccess,
-  handleDeleteCancel
+  handleDeleteCancel,
+  highlightedProductId,
+  handleDeduct, // Add this line
 }) => {
   return (
     <Table>
@@ -56,45 +77,47 @@ const ProductTable: React.FC<ProductTableProps> = ({
       </TableHeader>
       <TableBody>
         {products.map((product) => (
-          <TableRow key={product.id}>
+          <TableRow
+            key={product.id}
+            className={cn(
+              product.id === highlightedProductId && "bg-midLightBlue",
+              "transition-colors duration-300"
+            )}>
             <TableCell>{product.name}</TableCell>
             <TableCell>
               {product.stock}
               {product.isDivisible && product.fractionRemaining !== undefined
                 ? ` + ${product.fractionRemaining} ${product.fractionPerUnit}`
-                : ''}
+                : ""}
             </TableCell>
             <TableCell>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" className="h-8 w-8 p-0">
-                    <FaEllipsisV className="h-4 w-4" />
+                  <Button variant='ghost' className='h-8 w-8 p-0'>
+                    <FaEllipsisV className='h-4 w-4' />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-56">
-                  <div className="grid gap-4">
+                <PopoverContent className='w-56'>
+                  <div className='grid gap-4'>
                     <Button
-                      className="w-full justify-start"
-                      variant="ghost"
-                      onClick={() => setSelectedProduct(product)}
-                    >
-                      <FaMinus className="mr-2 h-4 w-4" />
+                      className='w-full justify-start'
+                      variant='ghost'
+                      onClick={() => setSelectedProduct(product)}>
+                      <FaMinus className='mr-2 h-4 w-4' />
                       Deduct
                     </Button>
                     <Button
-                      className="w-full justify-start"
-                      variant="ghost"
-                      onClick={() => setProductToUpdate(product)}
-                    >
-                      <FaEdit className="mr-2 h-4 w-4" />
+                      className='w-full justify-start'
+                      variant='ghost'
+                      onClick={() => setProductToUpdate(product)}>
+                      <FaEdit className='mr-2 h-4 w-4' />
                       Update
                     </Button>
                     <Button
-                      className="w-full justify-start text-red-600 hover:text-red-600 hover:bg-red-100"
-                      variant="ghost"
-                      onClick={() => setProductToDelete(product)}
-                    >
-                      <FaTrash className="mr-2 h-4 w-4" />
+                      className='w-full justify-start text-red-600 hover:text-red-600 hover:bg-red-100'
+                      variant='ghost'
+                      onClick={() => setProductToDelete(product)}>
+                      <FaTrash className='mr-2 h-4 w-4' />
                       Delete
                     </Button>
                   </div>
@@ -102,28 +125,37 @@ const ProductTable: React.FC<ProductTableProps> = ({
               </Popover>
 
               {/* Deduct Dialog */}
-              <Dialog open={selectedProduct?.id === product.id} onOpenChange={(open) => !open && setSelectedProduct(null)}>
+              <Dialog
+                open={selectedProduct?.id === product.id}
+                onOpenChange={(open) => !open && setSelectedProduct(null)}>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Deduct Product: {selectedProduct?.name}</DialogTitle>
+                    <DialogTitle>
+                      Deduct Product: {selectedProduct?.name}
+                    </DialogTitle>
                   </DialogHeader>
                   {selectedProduct && (
-                    <DeductProduct 
-                      product={selectedProduct} 
+                    <DeductProduct
+                      product={selectedProduct}
                       onSuccess={handleDeductSuccess}
+                      handleDeduct={handleDeduct}
                     />
                   )}
                 </DialogContent>
               </Dialog>
 
               {/* Update Dialog */}
-              <Dialog open={productToUpdate?.id === product.id} onOpenChange={(open) => !open && setProductToUpdate(null)}>
+              <Dialog
+                open={productToUpdate?.id === product.id}
+                onOpenChange={(open) => !open && setProductToUpdate(null)}>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Update Product: {productToUpdate?.name}</DialogTitle>
+                    <DialogTitle>
+                      Update Product: {productToUpdate?.name}
+                    </DialogTitle>
                   </DialogHeader>
                   {productToUpdate && (
-                    <UpdateProduct 
+                    <UpdateProduct
                       product={productToUpdate}
                       onSuccess={handleUpdateSuccess}
                     />
@@ -132,13 +164,17 @@ const ProductTable: React.FC<ProductTableProps> = ({
               </Dialog>
 
               {/* Delete Dialog */}
-              <Dialog open={productToDelete?.id === product.id} onOpenChange={(open) => !open && setProductToDelete(null)}>
+              <Dialog
+                open={productToDelete?.id === product.id}
+                onOpenChange={(open) => !open && setProductToDelete(null)}>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Delete Product: {productToDelete?.name}</DialogTitle>
+                    <DialogTitle>
+                      Delete Product: {productToDelete?.name}
+                    </DialogTitle>
                   </DialogHeader>
                   {productToDelete && (
-                    <DeleteProduct 
+                    <DeleteProduct
                       product={productToDelete}
                       onSuccess={handleDeleteSuccess}
                       onCancel={handleDeleteCancel}

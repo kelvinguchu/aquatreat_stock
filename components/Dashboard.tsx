@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/firebase";
 import {
   collection,
@@ -64,25 +64,51 @@ const Dashboard = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isAddProductDialogOpen, setIsAddProductDialogOpen] = useState(false);
 
+  const updateTopSelling = useCallback((deductions: Deduction[]) => {
+    const productDeductions = deductions.reduce((acc, deduction) => {
+      const { productName, amount } = deduction;
+      if (!acc[productName]) {
+        acc[productName] = 0;
+      }
+      acc[productName] += amount;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const topSellingProducts = Object.entries(productDeductions)
+      .map(([productName, totalDeductions]) => ({ productName, totalDeductions }))
+      .sort((a, b) => b.totalDeductions - a.totalDeductions)
+      .slice(0, 5);
+
+    setTopSelling(topSellingProducts);
+  }, []);
+
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       // Check cache for products
       const cachedProducts = await getCachedProducts();
       if (cachedProducts) {
         setProducts(cachedProducts);
-      } else {
-        // Fetch all products
-        const productsQuery = query(collection(db, "products"));
-        const productsSnapshot = await getDocs(productsQuery);
-        const productList: Product[] = productsSnapshot.docs.map(
+      }
+
+      // Set up snapshot listeners
+      const productsQuery = query(collection(db, "products"));
+      const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
+        const productList: Product[] = snapshot.docs.map(
           (doc) => ({ id: doc.id, ...doc.data() } as Product)
         );
         setProducts(productList);
-        // Update cache
-        await setCachedProducts(productList);
-      }
+        setCachedProducts(productList);
+      });
 
-      // Fetch low stock products
+      const categoriesQuery = query(collection(db, "categories"));
+      const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
+        const categoryList: Category[] = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          name: doc.data().name,
+        }));
+        setCategories(categoryList);
+      });
+
       const lowStockQuery = query(
         collection(db, "products"),
         where("stock", "<", 10),
@@ -95,37 +121,10 @@ const Dashboard = () => {
         setStockAlerts(productList);
       });
 
-      // Fetch top selling products
-      const topSellingQuery = query(
-        collection(db, "deductions"),
-        orderBy("amount", "desc"),
-        limit(100) // Fetch more to aggregate accurately
-      );
-      const topSellingSnapshot = await getDocs(topSellingQuery);
-      const deductionsData = topSellingSnapshot.docs.map(doc => doc.data());
-
-      // Process deductions to get top selling products
-      const productDeductions = deductionsData.reduce((acc, deduction) => {
-        const { productName, amount } = deduction;
-        if (!acc[productName]) {
-          acc[productName] = 0;
-        }
-        acc[productName] += amount;
-        return acc;
-      }, {} as Record<string, number>);
-
-      const topSellingProducts = Object.entries(productDeductions)
-        .map(([productName, totalDeductions]) => ({ productName, totalDeductions }))
-        .sort((a, b) => b.totalDeductions - a.totalDeductions)
-        .slice(0, 5); // Get only top 5
-
-      setTopSelling(topSellingProducts);
-
-      // Fetch latest deductions
       const latestDeductionsQuery = query(
         collection(db, "deductions"),
         orderBy("date", "desc"),
-        limit(5)
+        limit(100)
       );
       const unsubscribeDeductions = onSnapshot(latestDeductionsQuery, (snapshot) => {
         const deductionList: Deduction[] = snapshot.docs.map((doc) => {
@@ -135,38 +134,31 @@ const Dashboard = () => {
             productId: data.productId,
             productName: data.productName,
             amount: data.amount,
-            date:
-              data.date instanceof Timestamp
-                ? data.date.toDate()
-                : new Date(data.date),
+            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
           };
         });
-        setLatestDeductions(deductionList);
-      });
-
-      // Fetch categories
-      const categoriesQuery = query(collection(db, "categories"));
-      const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-        const categoryList: Category[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          name: doc.data().name,
-        }));
-        setCategories(categoryList);
+        setLatestDeductions(deductionList.slice(0, 5));
+        updateTopSelling(deductionList);
       });
 
       return () => {
+        unsubscribeProducts();
+        unsubscribeCategories();
         unsubscribeLowStock();
         unsubscribeDeductions();
-        unsubscribeCategories();
       };
     };
 
-    fetchData();
-  }, []);
+    fetchInitialData();
+  }, [updateTopSelling]);
 
   const handleReturnDeduction = async (deduction: Deduction) => {
     try {
       await returnDeduction(deduction);
+      // Remove the returned deduction from the local state
+      setLatestDeductions(prevDeductions => 
+        prevDeductions.filter(d => d.id !== deduction.id)
+      );
     } catch (error) {
       console.error("Error returning deduction:", error);
     }
@@ -309,6 +301,7 @@ const Dashboard = () => {
       <Deductions
         onReturnDeduction={handleReturnDeduction}
         onDeleteDeduction={handleDeleteDeduction}
+        categories={categories} // Pass categories to Deductions component
       />
 
       {/* Add Product Dialog */}

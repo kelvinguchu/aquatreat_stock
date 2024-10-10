@@ -6,7 +6,7 @@ interface StockAlertsProps {
 }
 
 const StockAlerts: React.FC<StockAlertsProps> = ({ stockAlerts }) => (
-  <div className='bg-midLightBlue p-4 rounded-lg shadow-md'>
+  <div className='bg-white p-4 rounded-lg shadow-lg hover:shadow-xl'>
     <div className='flex items-center space-x-2 mb-2'>
       <FaExclamationTriangle className='text-red-500 w-5 h-5' />
       <h2 className='text-lg font-semibold'>Stock Alert</h2>

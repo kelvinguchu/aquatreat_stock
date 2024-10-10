@@ -3,7 +3,8 @@ import { Sheet, SheetTrigger, SheetContent } from "@/components/ui/sheet";
 import { FaSearch, FaBell, FaBars } from "react-icons/fa";
 import Link from "next/link";
 import Sidebar from "./Sidebar";
-import Image from "next/image"; // For the logo
+import Image from "next/image"; 
+import Logout from "./Logout";
 
 const Navbar = () => {
   return (
@@ -26,7 +27,10 @@ const Navbar = () => {
       </div>
 
       {/* Center: Greeting */}
-      <div className='text-lg'>Hi, User</div>
+      <div className='text-lg font-bold'>Kamulu Stock Manager</div>
+      <div className='flex justify-end p-4'>
+        <Logout />
+      </div>
     </div>
   );
 };

@@ -1,12 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { FaSearch, FaTrash, FaEdit, FaPlus } from "react-icons/fa";
-import ProductTable from './ProductTable';
-import { DotLottieReact } from '@lottiefiles/dotlottie-react';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { FaEdit, FaPlus, FaTrash } from "react-icons/fa";
+import ProductTable from "./ProductTable";
+import SearchPopover from "./SearchPopover";
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 interface Product {
   id: string;
@@ -42,8 +55,8 @@ interface ProductInventoryProps {
   onAddProductToCategory: (categoryName: string) => void;
 }
 
-const ProductInventory: React.FC<ProductInventoryProps> = ({ 
-  products, 
+const ProductInventory: React.FC<ProductInventoryProps> = ({
+  products,
   categories,
   setSelectedProduct,
   setProductToUpdate,
@@ -58,15 +71,17 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
   handleAddProduct,
   onDeleteCategory,
   onRenameCategory,
-  onAddProductToCategory
+  onAddProductToCategory,
 }) => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<string>("");
   const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
-  const [deleteCategoryName, setDeleteCategoryName] = useState<string>('');
-  const [confirmDeleteName, setConfirmDeleteName] = useState<string>('');
+  const [deleteCategoryName, setDeleteCategoryName] = useState<string>("");
+  const [confirmDeleteName, setConfirmDeleteName] = useState<string>("");
   const [renameCategoryId, setRenameCategoryId] = useState<string | null>(null);
-  const [newCategoryName, setNewCategoryName] = useState<string>('');
+  const [newCategoryName, setNewCategoryName] = useState<string>("");
+  const [highlightedProductId, setHighlightedProductId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (categories.length > 0 && !activeTab) {
@@ -74,17 +89,18 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
     }
   }, [categories, activeTab]);
 
-  const filteredProducts = (categoryName: string) =>
-    products.filter(
-      (product) =>
-        product.categoryName === categoryName &&
-        product.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+  const handleSearchSelect = (productId: string, categoryName: string) => {
+    const category = categories.find((cat) => cat.name === categoryName);
+    if (category) {
+      setActiveTab(category.id);
+      setHighlightedProductId(productId);
+    }
+  };
 
   const handleDeleteCategory = (categoryId: string, categoryName: string) => {
     setDeleteCategoryId(categoryId);
     setDeleteCategoryName(categoryName);
-    setConfirmDeleteName('');
+    setConfirmDeleteName("");
   };
 
   const handleRenameCategory = (categoryId: string, currentName: string) => {
@@ -93,10 +109,10 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
   };
 
   const confirmRenameCategory = () => {
-    if (renameCategoryId && newCategoryName.trim() !== '') {
+    if (renameCategoryId && newCategoryName.trim() !== "") {
       onRenameCategory(renameCategoryId, newCategoryName.trim());
       setRenameCategoryId(null);
-      setNewCategoryName('');
+      setNewCategoryName("");
     }
   };
 
@@ -104,60 +120,85 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
     if (deleteCategoryId && confirmDeleteName === deleteCategoryName) {
       onDeleteCategory(deleteCategoryId, deleteCategoryName);
       setDeleteCategoryId(null);
-      setDeleteCategoryName('');
-      setConfirmDeleteName('');
+      setDeleteCategoryName("");
+      setConfirmDeleteName("");
     }
   };
 
+  const handleDeduct = async (amount: number) => {
+    if (selectedProduct) {
+      try {
+        const productRef = doc(db, "products", selectedProduct.id);
+        await updateDoc(productRef, {
+          stock: selectedProduct.stock - amount,
+        });
+
+        await addDoc(collection(db, "deductions"), {
+          productId: selectedProduct.id,
+          productName: selectedProduct.name,
+          categoryName: selectedProduct.categoryName,
+          amount: amount,
+          date: new Date(),
+        });
+
+        handleDeductSuccess();
+      } catch (error) {
+        console.error("Error deducting product:", error);
+      }
+    }
+  };
+
+  // Flatten products from all categories into a single array for search
+  const allProducts = products.map((product) => ({
+    id: product.id,
+    name: product.name,
+    categoryName: product.categoryName,
+  }));
+
   return (
-    <div className='bg-white p-6 rounded-lg shadow-md'>
+    <div className='bg-white p-6 rounded-lg shadow-md text-deepNavy'>
       <div className='flex justify-between items-center mb-4'>
         <h2 className='text-xl font-semibold'>Product Inventory</h2>
-        <div className='flex items-center'>
-          <FaSearch className='text-gray-400 mr-2' />
-          <Input
-            type='text'
-            placeholder='Search products...'
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className='max-w-xs'
-          />
-        </div>
+        <SearchPopover products={allProducts} onSelect={handleSearchSelect} />
       </div>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           {categories.map((category) => (
             <HoverCard key={category.id} openDelay={300} closeDelay={200}>
               <HoverCardTrigger asChild>
-                <TabsTrigger 
+                <TabsTrigger
                   value={category.id}
-                  className={`relative ${activeTab === category.id ? 'bg-midLightBlue text-[darkBlue]' : ''}`}
-                >
+                  className={`relative ${
+                    activeTab === category.id
+                      ? "bg-midLightBlue text-[darkBlue]"
+                      : ""
+                  }`}>
                   {category.name}
                 </TabsTrigger>
               </HoverCardTrigger>
-              <HoverCardContent className="w-auto" side="top">
-                <div className="flex flex-col space-y-2">
+              <HoverCardContent className='w-auto' side='top'>
+                <div className='flex flex-col space-y-2'>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleRenameCategory(category.id, category.name)}
-                  >
-                    <FaEdit className="mr-2" /> Rename Category
+                    variant='outline'
+                    size='sm'
+                    onClick={() =>
+                      handleRenameCategory(category.id, category.name)
+                    }>
+                    <FaEdit className='mr-2' /> Rename Category
                   </Button>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onAddProductToCategory(category.name)}
-                  >
-                    <FaPlus className="mr-2" /> Add Product
+                    variant='outline'
+                    size='sm'
+                    onClick={() => onAddProductToCategory(category.name)}>
+                    <FaPlus className='mr-2' /> Add Product
                   </Button>
                   <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleDeleteCategory(category.id, category.name)}
-                  >
-                    <FaTrash className="mr-2" /> Delete Category
+                    variant='destructive'
+                    size='sm'
+                    onClick={() =>
+                      handleDeleteCategory(category.id, category.name)
+                    }>
+                    <FaTrash className='mr-2' /> Delete Category
                   </Button>
                 </div>
               </HoverCardContent>
@@ -166,9 +207,12 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
         </TabsList>
         {categories.map((category) => (
           <TabsContent key={category.id} value={category.id}>
-            {filteredProducts(category.name).length > 0 ? (
-              <ProductTable 
-                products={filteredProducts(category.name)}
+            {products.filter((p) => p.categoryName === category.name).length >
+            0 ? (
+              <ProductTable
+                products={products.filter(
+                  (p) => p.categoryName === category.name
+                )}
                 setSelectedProduct={setSelectedProduct}
                 setProductToUpdate={setProductToUpdate}
                 setProductToDelete={setProductToDelete}
@@ -179,20 +223,23 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
                 handleUpdateSuccess={handleUpdateSuccess}
                 handleDeleteSuccess={handleDeleteSuccess}
                 handleDeleteCancel={handleDeleteCancel}
+                handleDeduct={handleDeduct}
+                highlightedProductId={highlightedProductId}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center">
+              <div className='flex flex-col items-center justify-center'>
                 <DotLottieReact
-                  src="https://lottie.host/cd05d6b5-1bed-4ead-9c5b-51dd473dc491/X9sRzN0NxR.json"
+                  src='https://lottie.host/cd05d6b5-1bed-4ead-9c5b-51dd473dc491/X9sRzN0NxR.json'
                   loop
                   autoplay
-                  style={{ width: '100px', height: '100px' }}
+                  style={{ width: "100px", height: "100px" }}
                 />
-                <p className="mt-4 text-lg font-semibold">No products in this category</p>
-                <Button 
+                <p className='mt-4 text-lg font-semibold'>
+                  No products in this category
+                </p>
+                <Button
                   className='mt-4 bg-darkBlue text-white'
-                  onClick={() => handleAddProduct(category.name)}
-                >
+                  onClick={() => handleAddProduct(category.name)}>
                   Add Product
                 </Button>
               </div>
@@ -201,7 +248,9 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
         ))}
       </Tabs>
 
-      <Dialog open={!!deleteCategoryId} onOpenChange={() => setDeleteCategoryId(null)}>
+      <Dialog
+        open={!!deleteCategoryId}
+        onOpenChange={() => setDeleteCategoryId(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Category: {deleteCategoryName}</DialogTitle>
@@ -210,22 +259,25 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
           <Input
             value={confirmDeleteName}
             onChange={(e) => setConfirmDeleteName(e.target.value)}
-            placeholder="Type category name here"
+            placeholder='Type category name here'
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteCategoryId(null)}>Cancel</Button>
-            <Button 
-              variant="destructive" 
+            <Button variant='outline' onClick={() => setDeleteCategoryId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
               onClick={confirmDeleteCategory}
-              disabled={confirmDeleteName !== deleteCategoryName}
-            >
+              disabled={confirmDeleteName !== deleteCategoryName}>
               Delete
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!renameCategoryId} onOpenChange={() => setRenameCategoryId(null)}>
+      <Dialog
+        open={!!renameCategoryId}
+        onOpenChange={() => setRenameCategoryId(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Rename Category</DialogTitle>
@@ -233,14 +285,15 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
           <Input
             value={newCategoryName}
             onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="Enter new category name"
+            placeholder='Enter new category name'
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameCategoryId(null)}>Cancel</Button>
-            <Button 
+            <Button variant='outline' onClick={() => setRenameCategoryId(null)}>
+              Cancel
+            </Button>
+            <Button
               onClick={confirmRenameCategory}
-              disabled={newCategoryName.trim() === ''}
-            >
+              disabled={newCategoryName.trim() === ""}>
               Rename
             </Button>
           </DialogFooter>
