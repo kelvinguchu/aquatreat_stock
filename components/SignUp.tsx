@@ -46,7 +46,7 @@ const SignUp: React.FC = () => {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button type="submit" className="w-full bg-darkBlue text-white" disabled={loading}>
           {loading ? 'Signing Up...' : 'Sign Up'}
         </Button>
         <p className="text-center">
