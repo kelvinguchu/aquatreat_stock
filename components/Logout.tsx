@@ -36,8 +36,8 @@ const Logout: React.FC = () => {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={handleLogout}>Logout</AlertDialogAction>
+          <AlertDialogCancel className='bg-darkBlue text-white'>Cancel</AlertDialogCancel>
+          <AlertDialogAction className='bg-red-500 text-white' onClick={handleLogout}>Logout</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
