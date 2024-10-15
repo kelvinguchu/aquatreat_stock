@@ -16,8 +16,6 @@ import {
   addDoc,
 } from "firebase/firestore";
 import { returnDeduction } from "@/lib/firebaseUtils";
-import StockAlerts from "./dashboard/StockAlerts";
-import TopSelling from "./dashboard/TopSelling";
 import ProductInventory from "./dashboard/ProductInventory";
 import Deductions from "./dashboard/Deductions";
 import { getCachedProducts, setCachedProducts, invalidateProductCache } from '@/lib/productCache';
@@ -47,40 +45,15 @@ interface Category {
   name: string;
 }
 
-interface TopSellingProduct {
-  productName: string;
-  totalDeductions: number;
-}
-
 const Dashboard = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [stockAlerts, setStockAlerts] = useState<Product[]>([]);
-  const [topSelling, setTopSelling] = useState<TopSellingProduct[]>([]);
   const [latestDeductions, setLatestDeductions] = useState<Deduction[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [productToUpdate, setProductToUpdate] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isAddProductDialogOpen, setIsAddProductDialogOpen] = useState(false);
-
-  const updateTopSelling = useCallback((deductions: Deduction[]) => {
-    const productDeductions = deductions.reduce((acc, deduction) => {
-      const { productName, amount } = deduction;
-      if (!acc[productName]) {
-        acc[productName] = 0;
-      }
-      acc[productName] += amount;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topSellingProducts = Object.entries(productDeductions)
-      .map(([productName, totalDeductions]) => ({ productName, totalDeductions }))
-      .sort((a, b) => b.totalDeductions - a.totalDeductions)
-      .slice(0, 5);
-
-    setTopSelling(topSellingProducts);
-  }, []);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -109,18 +82,6 @@ const Dashboard = () => {
         setCategories(categoryList);
       });
 
-      const lowStockQuery = query(
-        collection(db, "products"),
-        where("stock", "<", 10),
-        limit(20)
-      );
-      const unsubscribeLowStock = onSnapshot(lowStockQuery, (snapshot) => {
-        const productList: Product[] = snapshot.docs.map(
-          (doc) => ({ id: doc.id, ...doc.data() } as Product)
-        );
-        setStockAlerts(productList);
-      });
-
       const latestDeductionsQuery = query(
         collection(db, "deductions"),
         orderBy("date", "desc"),
@@ -138,19 +99,17 @@ const Dashboard = () => {
           };
         });
         setLatestDeductions(deductionList.slice(0, 5));
-        updateTopSelling(deductionList);
       });
 
       return () => {
         unsubscribeProducts();
         unsubscribeCategories();
-        unsubscribeLowStock();
         unsubscribeDeductions();
       };
     };
 
     fetchInitialData();
-  }, [updateTopSelling]);
+  }, []);
 
   const handleReturnDeduction = async (deduction: Deduction) => {
     try {
@@ -273,12 +232,6 @@ const Dashboard = () => {
 
   return (
     <div className='p-6 space-y-6'>
-
-      <div className='grid grid-cols-1 sm:grid-cols-2 gap-6'>
-        <StockAlerts stockAlerts={stockAlerts} />
-        <TopSelling topSelling={topSelling} />
-      </div>
-
       <ProductInventory 
         products={products} 
         categories={categories}

@@ -20,7 +20,7 @@ const TopSelling: React.FC<TopSellingProps> = ({ topSelling }) => (
       {topSelling.length > 0 ? (
         topSelling.map((product, index) => (
           <p key={index}>
-            {product.productName}: <span className='font-bold'>{product.totalDeductions}</span> deductions
+            {product.productName}: <span className='font-bold'>{product.totalDeductions}</span> units
           </p>
         ))
       ) : (

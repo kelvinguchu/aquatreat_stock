@@ -3,7 +3,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { FaEdit, FaPlus, FaTrash } from "react-icons/fa";
 import ProductTable from "./ProductTable";
-import SearchPopover from "./SearchPopover";
+import Search from "./Search";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import {
   HoverCard,
@@ -158,8 +158,8 @@ const ProductInventory: React.FC<ProductInventoryProps> = ({
   return (
     <div className='bg-white p-6 rounded-lg shadow-md text-deepNavy'>
       <div className='flex justify-between items-center mb-4'>
-        <h2 className='text-xl font-semibold'>Product Inventory</h2>
-        <SearchPopover products={allProducts} onSelect={handleSearchSelect} />
+        <h2 className='text-2xl font-semibold'>Product Inventory</h2>
+        <Search products={allProducts} onSelect={handleSearchSelect} />
       </div>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
